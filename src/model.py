@@ -306,7 +306,7 @@ class BertForCRFHeadNestedNER(BertPreTrainedModel):
 
 
 class Lattice_Transformer(nn.Module):
-    def __init__(self, lattice_emb, bigram_emb, hidden_size, ff_size,
+    def __init__(self, hidden_size, ff_size,
                     num_labels, num_layers, num_heads, max_len, dropout : dict,shared_pos_encoding = True ) -> None:
         super(Lattice_Transformer, self).__init__()
 
