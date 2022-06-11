@@ -85,6 +85,8 @@ python run_cmeee.py \
   --model_type                  ${MODEL_TYPE} \
   --model_path                  ${MODEL_PATH} \
   --head_type                   ${HEAD_TYPE} \
+  --lr_decay                    true \
+  --lr_decay_rate               0.9 \
   \
   --cblue_root                  ${CBLUE_ROOT} \
   --max_length                  512 \

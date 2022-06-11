@@ -15,6 +15,7 @@ from ee_data import EE_label2id2, EEDataset, EE_NUM_LABELS1, EE_NUM_LABELS2, EE_
 from model import BertForCRFHeadNER, BertForLinearHeadNER,  BertForLinearHeadNestedNER, BertForCRFHeadNestedNER, CRFClassifier, LinearClassifier
 from metrics import ComputeMetricsForNER, ComputeMetricsForNestedNER, extract_entities
 from torch.nn import LSTM
+from NewTrainer import Trainer_lr_decay
 
 MODEL_CLASS = {
     'linear': BertForLinearHeadNER, 
@@ -95,6 +96,9 @@ def main(_args: List[str] = None):
     model, tokenizer = get_model_with_tokenizer(model_args)
     for_nested_ner = 'nested' in model_args.head_type
 
+    lr_decay = model_args.lr_decay
+    lr_decay_rate = model_args.lr_decay_rate
+
     # ===== Get datasets =====
     if train_args.do_train:
         train_dataset = EEDataset(data_args.cblue_root, "train", data_args.max_length, tokenizer, for_nested_ner=for_nested_ner)
@@ -109,7 +113,8 @@ def main(_args: List[str] = None):
 
     print("This is the model for {}".format(for_nested_ner))
     
-    trainer = Trainer(
+    if lr_decay:
+        trainer = Trainer_lr_decay(
         model=model,
         tokenizer=tokenizer,
         args=train_args,
@@ -117,7 +122,21 @@ def main(_args: List[str] = None):
         train_dataset=train_dataset,
         eval_dataset=dev_dataset,
         compute_metrics=compute_metrics,
+        lr_decay_rate = lr_decay_rate
     )
+
+    else:
+        trainer = Trainer(
+            model=model,
+            tokenizer=tokenizer,
+            args=train_args,
+            data_collator=CollateFnForEE(tokenizer.pad_token_id, for_nested_ner=for_nested_ner),
+            train_dataset=train_dataset,
+            eval_dataset=dev_dataset,
+            compute_metrics=compute_metrics,
+        )
+
+    
     for i in train_dataset:
         print(i)
         break
