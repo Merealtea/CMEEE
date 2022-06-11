@@ -1,7 +1,6 @@
 
 from audioop import bias
 from typing import Optional
-from unicodedata import bidirectional
 
 import torch
 from dataclasses import dataclass
@@ -317,11 +316,11 @@ class Lattice_Transformer(nn.Module):
 
     def forward(
             self,
-            input_ids=None,
+            sen_embeds=None,
             sen_len = None,
             lat_len = None,
-            pos_s = None,
-            pos_e = None,
+            start_pos = None,
+            end_pos = None,
             attention_mask=None,
             token_type_ids=None,
             position_ids=None,
@@ -334,23 +333,22 @@ class Lattice_Transformer(nn.Module):
             return_dict=None,
             no_decode=False,
     ):
-        sequence_output = self.bert(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )[0]
-        """TODO : 把这里换了
-        """
+        # sequence_output = self.bert(
+        #     input_ids,
+        #     attention_mask=attention_mask,
+        #     token_type_ids=token_type_ids,
+        #     position_ids=position_ids,
+        #     head_mask=head_mask,
+        #     inputs_embeds=inputs_embeds,
+        #     output_attentions=output_attentions,
+        #     output_hidden_states=output_hidden_states,
+        #     return_dict=return_dict,
+        # )[0]
+        # """TODO : 把这里换了
+        # """
 
-        output = self.encoder.forward(output, pos_s, pos_e, sen_len, lat_len)
-        output = self.classifier.forward(sequence_output, attention_mask, labels, no_decode=no_decode)
-        
+        output = self.encoder.forward(sen_embeds, start_pos, end_pos, sen_len, lat_len)
+        output = self.classifier.forward(output, attention_mask, labels, no_decode=no_decode)
         return output
 
 
