@@ -28,3 +28,11 @@ class CBLUEDataArgs(_Args):
     cblue_root: str = field(metadata={"help": "CBLUE data root"})
     max_length: Optional[int] = field(default=128, metadata={"help": "Max sequence length"})
 
+@dataclass
+class FLATConstructArgs(_Args):
+    hidden_size : Optional[int] = field(default=200, metadata={"help" : "learning rate layer-wise decay rate, -1 means don`t use layer-wise decay"})
+    ff_size : Optional[int] = field(default=800, metadata={"help" : "learning rate layer-wise decay rate, -1 means don`t use layer-wise decay"})
+    num_layers : Optional[int] = field(default=8, metadata={"help" : "learning rate layer-wise decay rate, -1 means don`t use layer-wise decay"})
+    num_heads : Optional[int] = field(default=1, metadata={"help" : "learning rate layer-wise decay rate, -1 means don`t use layer-wise decay"})
+    shared_pos_encoding : Optional[bool] = field(default=True, metadata={"choice" : [True, False],"help" : "learning rate layer-wise decay rate, -1 means don`t use layer-wise decay"})
+

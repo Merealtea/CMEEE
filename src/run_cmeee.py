@@ -8,7 +8,7 @@ from sklearn.metrics import precision_recall_fscore_support
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertAttention
 from transformers import set_seed, BertTokenizer, Trainer, HfArgumentParser, TrainingArguments, BertLayer
 
-from args import ModelConstructArgs, CBLUEDataArgs
+from args import ModelConstructArgs, CBLUEDataArgs, FLATConstructArgs
 from logger import get_logger
 from ee_data import EE_label2id2, EEDataset, EE_NUM_LABELS1, EE_NUM_LABELS2, EE_NUM_LABELS, CollateFnForEE, \
     EE_label2id1, NER_PAD, EE_label2id
@@ -26,8 +26,8 @@ MODEL_CLASS = {
 }
 
 def get_logger_and_args(logger_name: str, _args: List[str] = None):
-    parser = HfArgumentParser([TrainingArguments, ModelConstructArgs, CBLUEDataArgs])
-    train_args, model_args, data_args = parser.parse_args_into_dataclasses(_args)
+    parser = HfArgumentParser([TrainingArguments, ModelConstructArgs, CBLUEDataArgs, FLATConstructArgs])
+    train_args, model_args, data_args, flat_args = parser.parse_args_into_dataclasses(_args)
 
     # ===== Get logger =====
     logger = get_logger(logger_name, exp_dir=train_args.logging_dir, rank=train_args.local_rank)
@@ -40,17 +40,36 @@ def get_logger_and_args(logger_name: str, _args: List[str] = None):
     logger.info(f"==== Train Arguments ==== {train_args.to_json_string()}")
     logger.info(f"==== Model Arguments ==== {model_args.to_json_string()}")
     logger.info(f"==== Data Arguments ==== {data_args.to_json_string()}")
+    logger.info(f"==== FLAT Arguments ==== {flat_args.to_json_string()}")
 
-    return logger, train_args, model_args, data_args
+    return logger, train_args, model_args, data_args, flat_args
 
 
-def get_model_with_tokenizer(model_args):
+def get_model_with_tokenizer(model_args, data_args, flat_args):
     model_class = MODEL_CLASS[model_args.head_type]
 
-    if 'nested' not in model_args.head_type:
-        model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS)
-    else:
-        model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS1, num_labels2=EE_NUM_LABELS2)
+    if isinstance(model_class, Lattice_Transformer):
+        dropout = {
+        'attn' : 0.02, # Attention 层的dropout
+        'res_1' : 0.02, # residual 层的dropout
+        'res_2' : 0.02, # 因为每个encode模块有两个残差链接
+        'ff_1' : 0.02, # FFN层的dropout
+        'ff_2' : 0.02, # FFN层的第二个dropout
+    }
+        model = model_class.__init__(flat_args.hidden_size,
+                                     flat_args.ff_size,
+                                     EE_NUM_LABELS,
+                                     flat_args.num_layers,
+                                     flat_args.num_heads,
+                                     data_args.max_length,
+                                     dropout,
+                                     flat_args.shared_pos_encoding
+                                     )
+    else:      
+        if 'nested' not in model_args.head_type:
+            model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS)
+        else:
+            model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS1, num_labels2=EE_NUM_LABELS2)
     
     tokenizer = BertTokenizer.from_pretrained(model_args.model_path)
     return model, tokenizer
