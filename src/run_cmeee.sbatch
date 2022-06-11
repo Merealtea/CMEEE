@@ -15,7 +15,7 @@ MODEL_TYPE=bert
 MODEL_PATH=../bert-base-chinese
 SEED=2022
 LABEL_NAMES=(labels)
-TASK_ID=1
+TASK_ID=4
 
 case ${TASK_ID} in
 0)
@@ -31,6 +31,9 @@ case ${TASK_ID} in
 3)
   HEAD_TYPE=crf_nested
   LABEL_NAMES=(labels labels2)
+  ;;
+4)
+  HEAD_TYPE=FLAT
   ;;
 *)
   echo "Error ${TASK_ID}"
@@ -85,9 +88,15 @@ python run_cmeee.py \
   --model_type                  ${MODEL_TYPE} \
   --model_path                  ${MODEL_PATH} \
   --head_type                   ${HEAD_TYPE} \
-  --lr_decay                    true \
-  --lr_decay_rate               0.9 \
+  --lr_decay_rate               -1 \
   \
   --cblue_root                  ${CBLUE_ROOT} \
   --max_length                  512 \
-  --label_names                 ${LABEL_NAMES[@]}
+  --label_names                 ${LABEL_NAMES[@]} \
+  \
+  --hidden_size                 200 \
+  --ff_size                     800 \
+  --num_layers                  8 \
+  --num_heads                   1 \
+  --shared_pos_encoding         true \
+  \

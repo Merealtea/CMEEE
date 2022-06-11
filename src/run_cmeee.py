@@ -48,15 +48,16 @@ def get_logger_and_args(logger_name: str, _args: List[str] = None):
 def get_model_with_tokenizer(model_args, data_args, flat_args):
     model_class = MODEL_CLASS[model_args.head_type]
 
-    if isinstance(model_class, Lattice_Transformer):
+
+    if model_class == Lattice_Transformer:
         dropout = {
         'attn' : 0.02, # Attention 层的dropout
         'res_1' : 0.02, # residual 层的dropout
         'res_2' : 0.02, # 因为每个encode模块有两个残差链接
         'ff_1' : 0.02, # FFN层的dropout
         'ff_2' : 0.02, # FFN层的第二个dropout
-    }
-        model = model_class.__init__(flat_args.hidden_size,
+        }
+        model = model_class(flat_args.hidden_size,
                                      flat_args.ff_size,
                                      EE_NUM_LABELS,
                                      flat_args.num_layers,
@@ -108,13 +109,13 @@ def generate_testing_results(train_args, logger, predictions, test_dataset, for_
 
 def main(_args: List[str] = None):
     # ===== Parse arguments =====
-    logger, train_args, model_args, data_args = get_logger_and_args(__name__, _args)
+    logger, train_args, model_args, data_args, flat_args = get_logger_and_args(__name__, _args)
 
     # ===== Set random seed =====
     set_seed(train_args.seed)
 
     # ===== Get models =====
-    model, tokenizer = get_model_with_tokenizer(model_args)
+    model, tokenizer = get_model_with_tokenizer(model_args, data_args, flat_args)
     for_nested_ner = 'nested' in model_args.head_type
 
     lr_decay_rate = model_args.lr_decay_rate
