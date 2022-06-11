@@ -13,6 +13,9 @@ import torch
 from torch.utils.data import Dataset
 import pdb
 from lexicon_tree import lexicon_tree
+from fastNLP.core import Vocabulary
+from fastNLP_module import StaticEmbedding
+import warnings
 logger = logging.getLogger(__name__)
 
 NER_PAD, NO_ENT = '[PAD]', 'O'
@@ -37,15 +40,13 @@ EE_NUM_LABELS1 = len(EE_id2label1)
 EE_NUM_LABELS2 = len(EE_id2label2)
 EE_NUM_LABELS  = len(EE_id2label)
 
-lex_tree = lexicon_tree()
-
 class InputExample:
     def __init__(self, sentence_id: str, text: str,entities: List[dict] = None):
         self.sentence_id = sentence_id
         self.text = text
         self.entities = entities
 
-    def to_ner_task(self, for_nested_ner: bool = False):    
+    def to_ner_task(self, lex_tree, for_nested_ner: bool = False):    
         '''NOTE: This function is what you need to modify for Nested NER.
         '''
         """这个通过label的位置生成整句话的label
@@ -217,6 +218,153 @@ class EEDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx], self.no_decode
 
+class FlatDataset(Dataset):
+    def __init__(self, cblue_root: str, mode: str, max_length: int, unipath: str, wordpath: str, for_nested_ner: bool):
+        self.cblue_root = cblue_root
+        self.data_root = join(cblue_root, "CMeEE")
+        self.max_length = max_length
+        self.for_nested_ner = for_nested_ner
+        self.unipath = unipath
+        self.wordpath = wordpath
+        self.lexicon_words = []
+        self.lexicon_tree = lexicon_tree()
+        
+
+        # This flag is used in CRF
+        self.no_decode = mode.lower() == "train"
+
+        self.uni_vocab = Vocabulary()
+        self.word_vocab = Vocabulary()
+        self.build_vocab(self.uni_vocab, self.unipath)
+        self.build_vocab(self.word_vocab, self.wordpath, self.lexicon_words)
+        self.lexicon_tree.insert_word(self.lexicon_words)
+        print("Finish Vocab Construction~")
+
+        self.uni_embedding = StaticEmbedding(self.uni_vocab,self.unipath)
+        self.word_embedding = StaticEmbedding(self.word_vocab,self.wordpath)
+        print("Finish Embedding Construction")
+
+        text = "成人在研究儿童"
+        start_pos, end_pos, text, sen_len = self.lexicon_tree.get_lattice(text)
+        words = torch.LongTensor([self.uni_vocab.to_index(word) for word in text]).reshape(-1,1)
+        print(start_pos, end_pos, text, sen_len)
+        print(self.uni_embedding.forward(words=words).shape)
+
+        self.examples = EEDataloader(cblue_root).get_data(mode) # get original data
+        self.data = self._preprocess(self.examples) # preprocess
+
+    def build_vocab(self, vocab, model_path, lexicon_words=None, error='ignore'):
+        with open(model_path, 'r', encoding='utf-8') as f:
+            line = f.readline().strip()
+            parts = line.split()
+            start_idx = 0
+            if len(parts) == 2:
+                dim = int(parts[1])
+                start_idx += 1
+            else:
+                dim = len(parts) - 1
+                f.seek(0)
+            for idx, line in enumerate(f, start_idx):
+                try:
+                    parts = line.strip().split()
+                    word = ''.join(parts[:-dim])
+                    vocab.add_word(word)
+                    if lexicon_words is not None:
+                        lexicon_words.append(word)
+                except Exception as e:
+                    if error == 'ignore':
+                        warnings.warn("Error occurred at the {} line.".format(idx))
+                    else:
+                        logger.error("Error occurred at the {} line.".format(idx))
+                        raise e
+
+    def _preprocess(self, examples: List[InputExample]) -> list:
+        '''NOTE: This function is what you need to modify for Nested NER.
+        '''
+        """这个是将text和label转为id
+        """
+        is_test = examples[0].entities is None
+        data = []
+
+        if self.for_nested_ner:
+            label2id1 = EE_label2id1
+            label2id2 = EE_label2id2
+        else:
+            label2id = EE_label2id
+
+        sen_counter = 0
+
+        for example in examples:
+            if is_test:
+                sentence_id, text, start_pos, end_pos, sen_len = example.to_ner_task(self.lexicon_tree,self.for_nested_ner)
+                if self.for_nested_ner:
+                    label1 = repeat(None, len(text))
+                    label2 = repeat(None, len(text))
+                else:
+                    label = repeat(None, len(text))
+            else:
+                if self.for_nested_ner:
+                    _sentence_id, text, label1, label2, start_pos, end_pos, sen_len = example.to_ner_task(self.lexicon_tree,self.for_nested_ner)
+                else:
+                    _sentence_id, text, label, start_pos, end_pos, sen_len = example.to_ner_task(self.lexicon_tree,self.for_nested_ner)
+
+
+            char_ids = []
+            word_ids = []
+            if self.for_nested_ner:
+                label_ids1 = None if is_test else []
+                label_ids2 = None if is_test else []
+            else:
+                label_ids = None if is_test else []
+            
+            for i in range(sen_len):
+                char_id = self.uni_vocab.to_index(text[i])
+                char_ids.append(char_id)
+            for i in range(sen_len+1,len(text)):
+                word_id = self.word_vocab.to_index(text[i])
+                word_ids.append(word_id)
+            if self.for_nested_ner:
+                for word, L1, L2 in zip(text, label1, label2):
+                    if not is_test:
+                        label_ids1.extend([label2id1[L1]])
+                        label_ids2.extend([label2id2[L2]])
+            else:
+                for word, L in zip(text,label):
+                    if not is_test:
+                        label_ids.extend([label2id[L]])
+            sentence_ids = char_ids + word_ids
+            sentence_ids = sentence_ids[:self.max_length]
+            char_ids = torch.LongTensor(char_ids).reshape(1,-1)
+            word_ids = torch.LongTensor(word_ids).reshape(1,-1)
+            
+            char_embed = self.uni_embedding.forward(char_ids)
+            word_embed = self.word_embedding.forward(word_ids)
+            sen_embed = torch.cat((char_embed,word_embed),dim = 1)
+            sen_embed = sen_embed[:,:self.max_length,:]
+            
+            sen_counter += 1
+
+
+            if not is_test:
+                if self.for_nested_ner:
+                    label_ids1 = label_ids1[: self.max_length]
+                    label_ids2 = label_ids2[: self.max_length]
+                    data.append((sentence_ids, start_pos, end_pos, sen_len, sen_embed , label_ids1, label_ids2))
+                else:
+                    label_ids = label_ids[: self.max_length]
+                    data.append((sentence_ids, start_pos, end_pos, sen_len, sen_embed , label_ids))
+            else:
+                data.append((sentence_ids, start_pos, end_pos, sen_len, sen_embed))
+        
+        print("finish loading {} sentences".format(sen_counter))
+        return data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx], self.no_decode
+
 
 class CollateFnForEE:
     def __init__(self, pad_token_id: int, label_pad_token_id: int = EE_label2id[NER_PAD], for_nested_ner: bool = False):
@@ -229,35 +377,33 @@ class CollateFnForEE:
         '''
         """这里是将每一句话进行pad到固定长度
         """
-        pdb.set_trace()
         inputs = [x[0] for x in batch]
         no_decode_flag = batch[0][1]
 
         input_ids = [x[0] for x in inputs]
+        start_pos = [x[1] for x in inputs]
+        end_pos = [x[2] for x in inputs]
+        sen_len = [x[3] for x in inputs]
+        sen_embeds = [x[4] for x in inputs]
 
         if self.for_nested_ner:
-            labels1 = [x[1]  for x in inputs] if len(inputs[0]) > 4 else None
-            labels2 = [x[2]  for x in inputs] if len(inputs[0]) > 4 else None
+            labels1 = [x[5]  for x in inputs] if len(inputs[0]) > 5 else None
+            labels2 = [x[6]  for x in inputs] if len(inputs[0]) > 6 else None
         else:
-            labels  = [x[1]  for x in inputs] if len(inputs[0]) > 4 else None
-
-        sen_lens = [x[-1] for x in inputs]
-        start_pos = [x[-3] for x in inputs]
-        end_pos = [x[-2] for x in inputs]
+            labels  = [x[5]  for x in inputs] if len(inputs[0]) > 5 else None
     
         max_len = max(map(len, input_ids))
         attention_mask = torch.zeros((len(batch), max_len), dtype=torch.long)
 
         for i, _ids in enumerate(input_ids):
-            attention_mask[i][:sen_lens[i]] = 1
+            attention_mask[i][:len(_ids)] = 1
             _delta_len = max_len - len(_ids)
             input_ids[i] += [self.pad_token_id] * _delta_len
+            start_pos[i] += [0] * _delta_len
+            end_pos[i] += [0] * _delta_len
+            padding_embed = torch.zeros((1,_delta_len,sen_embeds[i].shape[2]))
+            sen_embeds[i] = torch.cat((sen_embeds[i],padding_embed),dim = 1)
 
-            """_delta_len = max_len
-                这里可能有问题，因为label的长度与inputs的长度可能不一致
-                对start_pos和end_pos的pad处理也有问题
-                TM 不用pad
-            """
             
             if not self.for_nested_ner and labels is not None:
                 labels[i] += [self.label_pad_token_id] * _delta_len
@@ -268,6 +414,10 @@ class CollateFnForEE:
 
         if not self.for_nested_ner:
             inputs = {
+                "sen_len": torch.tensor(sen_len, dtype=torch.long),
+                "start_pos": torch.tensor(start_pos, dtype=torch.long),
+                "end_pos": torch.tensor(end_pos, dtype=torch.long),
+                "sen_embeds": sen_embeds,
                 "input_ids": torch.tensor(input_ids, dtype=torch.long),
                 "attention_mask": attention_mask,
                 "labels": torch.tensor(labels, dtype=torch.long) if labels is not None else None,
@@ -276,6 +426,9 @@ class CollateFnForEE:
         else:
             inputs = {
                 "input_ids": torch.tensor(input_ids, dtype=torch.long),
+                "start_pos": torch.tensor(start_pos, dtype=torch.long),
+                "end_pos": torch.tensor(end_pos, dtype=torch.long),
+                "sen_embeds": sen_embeds,
                 "attention_mask": attention_mask,
                 "labels": torch.tensor(labels1, dtype=torch.long) if labels1 is not None else None,
                 "labels2": torch.tensor(labels2, dtype=torch.long) if labels2 is not None else None,
@@ -286,18 +439,27 @@ class CollateFnForEE:
 
 
 if __name__ == '__main__':
+    # words = ["儿童", "研究", "成人"]
+    # lex_tree.insert_word(words)
+    # text = "成人在研究儿童"
+    # start_pos, end_pos, text, sen_len = lex_tree.get_lattice(text)
+    # print(start_pos, end_pos, text, sen_len)
+
     from os.path import expanduser
     from transformers import BertTokenizer
 
    
     MODEL_NAME = "../bert-base-chinese"
     CBLUE_ROOT = "../data/CBLUEDatasets"
+    unimodel_path = '../pretrain_model/gigaword_chn.all.a2b.uni.ite50.vec'
+    bimodel_path = '../pretrain_model/gigaword_chn.all.a2b.bi.ite50.vec'
+    wordmodel_path = '../pretrain_model/ctb.50d.vec'
 
-    words = ["儿童", "研究", "成人"]
-    lex_tree.insert_word(words)
+    dataset = FlatDataset(CBLUE_ROOT, mode="dev", max_length=100, unipath=unimodel_path, wordpath=wordmodel_path, for_nested_ner=False)
+    
 
-    tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
-    dataset = EEDataset(CBLUE_ROOT, mode="dev", max_length=100, tokenizer=tokenizer, for_nested_ner=True)
+    # tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
+    # dataset = EEDataset(CBLUE_ROOT, mode="dev", max_length=100, tokenizer=tokenizer, for_nested_ner=True)
     batch = [dataset[0], dataset[1], dataset[2]]
-    inputs = CollateFnForEE(pad_token_id=tokenizer.pad_token_id, for_nested_ner=True)(batch)
+    inputs = CollateFnForEE(pad_token_id=Vocabulary().padding_idx, for_nested_ner=False)(batch)
     print(inputs)
