@@ -3,11 +3,9 @@ from transformers import Trainer
 from torch import nn
 import torch
 from torch.optim.swa_utils import AveragedModel, SWALR
-<<<<<<< HEAD
-=======
 from torch.utils.data import DataLoader,IterableDataset
 from torch.utils.data.distributed import DistributedSampler
->>>>>>> dev-cxy
+from tqdm import tqdm
 
 def get_parameter_names(model, forbidden_layer_types):
     """
@@ -58,9 +56,8 @@ class Trainer_lr_decay(Trainer):
         self.swa_update_epoches = swa_update_epoches # 参数平均的训练轮数
         self.swa_scheduler = None
         self.swa_model = None
-
+   
     def create_optimizer_and_scheduler(self, num_training_steps: int):
-<<<<<<< HEAD
         """
         Setup the optimizer and the learning rate scheduler.
 
@@ -68,18 +65,10 @@ class Trainer_lr_decay(Trainer):
         Trainer's init through :obj:`optimizers`, or subclass and override this method (or :obj:`create_optimizer`
         and/or :obj:`create_scheduler`) in a subclass.
         """
-=======
-        """
-        Setup the optimizer and the learning rate scheduler.
-
-        We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
-        Trainer's init through :obj:`optimizers`, or subclass and override this method (or :obj:`create_optimizer`
-        and/or :obj:`create_scheduler`) in a subclass.
-        """
->>>>>>> dev-cxy
         self.create_optimizer()
         self.create_scheduler(num_training_steps=num_training_steps, optimizer=self.optimizer)
         self.create_swa_scheduler(self.optimizer, self.model)
+        print("完成创建优化器和scheduler")
 
     def create_optimizer(self):
         """
@@ -88,6 +77,15 @@ class Trainer_lr_decay(Trainer):
         We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
         Trainer's init through `optimizers`, or subclass and override this method in a subclass.
         """
+        assert self.lr_decay_rate < 1, "lr decay rate 应该在0,1之间，或者是-1"
+
+        if self.lr_decay_rate == -1:
+            print("没有使用layer-wise lr decay")
+        else:
+            print(f"使用了layer-wise lr decay ， decay rate 是 {self.lr_decay_rate}")
+
+        print(self.args.device)
+
         lr_decay_rate = 1 if self.lr_decay_rate == -1 else self.lr_decay_rate
 
         opt_model = self.model
@@ -142,57 +140,25 @@ class Trainer_lr_decay(Trainer):
             self.swa_model = AveragedModel(model)
             self.swa_scheduler = SWALR(optimizer, swa_lr=0.05)
 
-<<<<<<< HEAD
-    def train_swa(self):
-        if not self.swa:
-            return 
-        train_dataloader = self.get_train_dataloader()
-=======
-
-    def create_swa_scheduler(self, optimizer: torch.optim.Optimizer = None, model : torch.nn.Module = None):
-        """ 创建stochatic weight average scheduler
-        """
-        if self.swa and self.swa_scheduler is None:
-            self.swa_model = AveragedModel(model)
-            self.swa_scheduler = SWALR(optimizer, swa_lr=0.05)
-
 
     def train_swa(self):
         if not self.swa:
+            self.swa_model = self.swa
             return self.model
 
         train_dataloader = self.get_train_dataloader()
 
         args = self.args
 
->>>>>>> dev-cxy
-        tr_loss = torch.tensor(0.0).to(args.device)
-
         for epoch in range(self.swa_update_epoches):
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
                 train_dataloader.sampler.set_epoch(epoch)
-<<<<<<< HEAD
-            elif isinstance(train_dataloader.dataset, IterableDatasetShard):
-                train_dataloader.dataset.set_epoch(epoch)
-
-            for input, target in train_dataloader:
-                optimizer.zero_grad()
-                loss_fn(model(input), target).backward()
-                optimizer.step()
-            
-                self.swa_model.update_parameters(self.model)
-                self.swa_scheduler.step()
-
-        # Update bn statistics for the swa_model at the end
-        torch.optim.swa_utils.update_bn(loader, swa_model)
-        # Use swa_model to make predictions on test data 
-        preds = swa_model(test_input)
-=======
             elif isinstance(train_dataloader.dataset, IterableDataset):
                 train_dataloader.dataset.set_epoch(epoch)
             self.optimizer.zero_grad()
-
-            for step, input in enumerate(train_dataloader):
+            
+            tr_loss = torch.tensor(0.0).to(args.device)
+            for step, input in tqdm(enumerate(train_dataloader)):
                 loss = self.compute_loss(self.model, input)
                 loss.backward()
                 tr_loss += loss.detach()
@@ -202,6 +168,8 @@ class Trainer_lr_decay(Trainer):
                     self.swa_model.update_parameters(self.model)
                     self.swa_scheduler.step()
                     self.optimizer.zero_grad()
+            tr_loss /= step
+            print(f"train loss is {tr_loss}")
 
         # Update bn statistics for the swa_model at the end
         torch.optim.swa_utils.update_bn(train_dataloader, self.swa_model)
@@ -212,31 +180,3 @@ class Trainer_lr_decay(Trainer):
         """将模型设置为参数平均后的模型，方便测试
         """
         self.model = self.swa_model
->>>>>>> dev-cxy
-
-
-# def create_lr_decay_optimizer(trainer, lr_decay):
-#     layer_names = []
-#     for name, _ in trainer.model.named_parameters():
-#         layer_names.append(name)
-
-#     # 越底层的layer学习率要越大
-#     layer_names.reverse()
-
-#     parameters = []
-
-#     prev_name = layer_names[0].split('.')[0]
-#     lr = trainer.lr
-
-#     for name in layer_names:
-#         cur_name = name.split('.')[0]
-
-#         if cur_name != prev_name:
-#             lr *= self.lr_decay_rate
-#         prev_name = cur_name
-        
-#         parameters += [{'params': 
-#                             [p for n, p in model.named_parameters() if n == name and p.requires_grad], 
-#                         'lr': lr}]
-#     optim = torch.optim.AdamW(parameters,
-#                             weight_decay= weight_decay_rate)

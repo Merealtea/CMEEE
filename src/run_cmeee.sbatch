@@ -10,6 +10,9 @@
 #SBATCH --error=../logs/run_cmeee-%A.log
 
 CBLUE_ROOT=../data/CBLUEDatasets
+wordmodel_path=../pretrain_model/ctb.50d.vec
+bimodel_path=../pretrain_model/gigaword_chn.all.a2b.bi.ite50.vec
+unimodel_path=../pretrain_model/gigaword_chn.all.a2b.uni.ite50.vec
   
 MODEL_TYPE=bert
 MODEL_PATH=../bert-base-chinese
@@ -92,10 +95,13 @@ python run_cmeee.py \
   \
   --cblue_root                  ${CBLUE_ROOT} \
   --max_length                  512 \
+  --unimodel_path               ${unimodel_path}\
+  --bimodel_path                ${bimodel_path}\
+  --wordmodel_path              ${wordmodel_path}\
   --label_names                 ${LABEL_NAMES[@]} \
   \
-  --hidden_size                 200 \
-  --ff_size                     800 \
+  --hidden_size                 50 \
+  --ff_size                     200 \
   --num_layers                  8 \
   --num_heads                   1 \
   --shared_pos_encoding         true \

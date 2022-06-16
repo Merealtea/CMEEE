@@ -27,6 +27,9 @@ class ModelConstructArgs(_Args):
 class CBLUEDataArgs(_Args):
     cblue_root: str = field(metadata={"help": "CBLUE data root"})
     max_length: Optional[int] = field(default=128, metadata={"help": "Max sequence length"})
+    unimodel_path : str = field(default='../pretrain_model/gigaword_chn.all.a2b.uni.ite50.vec', metadata={"help": "CBLUE data root"})
+    bimodel_path : str = field(default='../pretrain_model/gigaword_chn.all.a2b.bi.ite50.vec', metadata={"help": "CBLUE data root"})
+    wordmodel_path : str = field(default='../pretrain_model/ctb.50d.vec', metadata={"help": "CBLUE data root"})
 
 @dataclass
 class FLATConstructArgs(_Args):
