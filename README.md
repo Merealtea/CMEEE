@@ -10,7 +10,7 @@ Knowledge Graph HM
     GigaWord：https://pan.baidu.com/s/1pLO6T9D
 
 ## 模型部分
-新使用到的模型为Global Point模型和FLAT模型，对应的模型结构在./src文件夹中
+新使用到的模型为GlobalPointer模型和FLAT模型，对应的模型结构在./src文件夹中
 
 ## 优化训练技巧
 使用到的对抗训练代码实现在./src/adversarial.py中，随机参数平均和逐层学习率下降优化都是通过对Trainer进行重载后得到，新重载的Trainer在./src/NewTrainer.py文件中
