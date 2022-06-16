@@ -1,4 +1,6 @@
-# Auther:https://github.com/xhw205/GlobalPointer_torch/blob/main/predict_CME.py
+"""
+Reference code url: https://github.com/gaohongkui/GlobalPointer_pytorch/tree/main/models
+"""
 
 from transformers import BertModel, BertTokenizerFast, BertForSequenceClassification
 from GP_module import GlobalPointer
