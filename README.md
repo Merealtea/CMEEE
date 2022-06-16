@@ -18,3 +18,19 @@ Knowledge Graph HM
 ## 训练模型
 运行./src/run_cmeee.py文件即可
 
+## Requirements
+    
+    datasets==1.10.0
+    FastNLP==0.7.0
+    gensim==4.1.2
+    huggingface-hub==0.0.19
+    jieba==0.42.1
+    nltk==3.7
+    pytorch-crf==0.7.2
+    tensorflow-estimator==1.13.0
+    tokenizers==0.10.3
+    torch==1.11.0
+    torchaudio==0.11.0
+    torchvision==0.12.0
+    tqdm==4.62.3
+    transformers==4.11.0
