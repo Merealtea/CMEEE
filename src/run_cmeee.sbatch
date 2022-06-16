@@ -10,12 +10,15 @@
 #SBATCH --error=../logs/run_cmeee-%A.log
 
 CBLUE_ROOT=../data/CBLUEDatasets
+wordmodel_path=../pretrain_model/ctb.50d.vec
+bimodel_path=../pretrain_model/gigaword_chn.all.a2b.bi.ite50.vec
+unimodel_path=../pretrain_model/gigaword_chn.all.a2b.uni.ite50.vec
   
 MODEL_TYPE=bert
 MODEL_PATH=../bert-base-chinese
 SEED=2022
 LABEL_NAMES=(labels)
-TASK_ID=1
+TASK_ID=4
 
 case ${TASK_ID} in
 0)
@@ -31,6 +34,9 @@ case ${TASK_ID} in
 3)
   HEAD_TYPE=crf_nested
   LABEL_NAMES=(labels labels2)
+  ;;
+4)
+  HEAD_TYPE=FLAT
   ;;
 *)
   echo "Error ${TASK_ID}"
@@ -85,9 +91,18 @@ python run_cmeee.py \
   --model_type                  ${MODEL_TYPE} \
   --model_path                  ${MODEL_PATH} \
   --head_type                   ${HEAD_TYPE} \
-  --lr_decay                    true \
-  --lr_decay_rate               0.9 \
+  --lr_decay_rate               -1 \
   \
   --cblue_root                  ${CBLUE_ROOT} \
   --max_length                  512 \
-  --label_names                 ${LABEL_NAMES[@]}
+  --unimodel_path               ${unimodel_path}\
+  --bimodel_path                ${bimodel_path}\
+  --wordmodel_path              ${wordmodel_path}\
+  --label_names                 ${LABEL_NAMES[@]} \
+  \
+  --hidden_size                 50 \
+  --ff_size                     200 \
+  --num_layers                  8 \
+  --num_heads                   1 \
+  --shared_pos_encoding         true \
+  \

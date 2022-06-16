@@ -1,5 +1,6 @@
 
 from audioop import bias
+import pdb
 from typing import Optional
 
 import torch
@@ -60,7 +61,7 @@ class CRFClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_size, num_labels)
         )
-        self.crf = self.CRFlayer = CRF(num_labels, batch_first = True)
+        self.crf = CRF(num_labels, batch_first = True)
 
         '''NOTE: This is where to modify for CRF.
 
@@ -303,20 +304,26 @@ class BertForCRFHeadNestedNER(BertPreTrainedModel):
         output2 = self.classifier2.forward(sequence_output, attention_mask,labels2, no_decode=no_decode)
         return _group_ner_outputs(output1, output2)
 
-
-
 class Lattice_Transformer(nn.Module):
-    def __init__(self, hidden_size, ff_size,
+    def __init__(self, uniembed, biembed,hidden_size, ff_size,
                     num_labels, num_layers, num_heads, max_len, dropout : dict,shared_pos_encoding = True ) -> None:
         super(Lattice_Transformer, self).__init__()
+        self.embed_drop = nn.Dropout(0.5)
+        self.embed = self.conbine_embed(uniembed, biembed)
 
-        self.embedding = None
         self.encoder = Transformer_Encoder(hidden_size, ff_size, num_layers, num_heads, max_len, shared_pos_encoding, dropout)
         self.classifier = CRFClassifier(hidden_size, num_labels, dropout=0.02)
 
+    def conbine_embed(self, uni, bi):
+        t = uni.embedding.weight
+        p = bi.embedding.weight
+        new_weight = torch.cat([t,p])
+        new_emb = torch.nn.Embedding.from_pretrained(new_weight, freeze = False)
+        return new_emb
+
     def forward(
             self,
-            sen_embeds=None,
+            input_ids=None,
             sen_len = None,
             lat_len = None,
             start_pos = None,
@@ -333,20 +340,9 @@ class Lattice_Transformer(nn.Module):
             return_dict=None,
             no_decode=False,
     ):
-        # sequence_output = self.bert(
-        #     input_ids,
-        #     attention_mask=attention_mask,
-        #     token_type_ids=token_type_ids,
-        #     position_ids=position_ids,
-        #     head_mask=head_mask,
-        #     inputs_embeds=inputs_embeds,
-        #     output_attentions=output_attentions,
-        #     output_hidden_states=output_hidden_states,
-        #     return_dict=return_dict,
-        # )[0]
-        # """TODO : 把这里换了
-        # """
-
+    
+        sen_embeds = self.embed(input_ids)
+        sen_embeds = self.embed_drop(sen_embeds)
         output = self.encoder.forward(sen_embeds, start_pos, end_pos, sen_len, lat_len)
         output = self.classifier.forward(output, attention_mask, labels, no_decode=no_decode)
         return output

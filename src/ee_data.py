@@ -1,20 +1,19 @@
 
+from inspect import stack
 import json
 import logging
 import pickle
 import re
-from collections import Counter
 from itertools import repeat
 from os.path import join, exists
 from typing import List
 
-import numpy as np
 import torch
 from torch.utils.data import Dataset
 import pdb
 from lexicon_tree import lexicon_tree
 from fastNLP.core import Vocabulary
-from fastNLP_module import StaticEmbedding
+from transformers import BertModel
 import warnings
 import pdb
 logger = logging.getLogger(__name__)
@@ -59,10 +58,10 @@ class InputExample:
             return self.sentence_id, self.text, start_pos, end_pos, sen_len
         else:
             if not for_nested_ner:
-                label = [NO_ENT] * len(self.text)
+                label = [NO_ENT] * sen_len
             else:
-                label1 = [NO_ENT] * len(self.text)
-                label2 = [NO_ENT] * len(self.text)
+                label1 = [NO_ENT] * sen_len
+                label2 = [NO_ENT] * sen_len
 
             def _write_label(_label: list, _type: str, _start: int, _end: int):
                 for i in range(_start, _end + 1):
@@ -81,9 +80,6 @@ class InputExample:
                 if not for_nested_ner:
                     _write_label(label, entity_type, start_idx, end_idx)
                 else:
-                    '''NOTE
-
-                    '''
                     if entity_type in LABEL1:
                         _write_label(label1, entity_type, start_idx, end_idx)
                     else:
@@ -220,7 +216,7 @@ class EEDataset(Dataset):
         return self.data[idx], self.no_decode
 
 class FlatDataset(Dataset):
-    def __init__(self, cblue_root: str, mode: str, max_length: int, unipath: str, wordpath: str, for_nested_ner: bool):
+    def __init__(self, cblue_root: str, mode: str, max_length: int, unipath: str, wordpath: str, for_nested_ner: bool, use_bert = False):
         self.cblue_root = cblue_root
         self.data_root = join(cblue_root, "CMeEE")
         self.max_length = max_length
@@ -229,30 +225,33 @@ class FlatDataset(Dataset):
         self.wordpath = wordpath
         self.lexicon_words = []
         self.lexicon_tree = lexicon_tree()
-        
+        self.use_bert = use_bert
+        self.used_words = []
 
         # This flag is used in CRF
         self.no_decode = mode.lower() == "train"
-
         self.uni_vocab = Vocabulary()
         self.word_vocab = Vocabulary()
         self.build_vocab(self.uni_vocab, self.unipath)
         self.build_vocab(self.word_vocab, self.wordpath, self.lexicon_words)
-        self.lexicon_tree.insert_word(self.lexicon_words)
-        print("Finish Vocab Construction~")
+        self.uni_num = len(self.uni_vocab)
 
-        self.uni_embedding = StaticEmbedding(self.uni_vocab,self.unipath)
-        self.word_embedding = StaticEmbedding(self.word_vocab,self.wordpath)
-        print("Finish Embedding Construction")
+        unigram, bigram =  0,0
+        for word in self.lexicon_words:
+            if len(word) == 1:
+                unigram +=1
+            if len(word) == 2 :
+                bigram += 1
+        print(f"unigram num {unigram}, bigram num {bigram}")
+
+        if not use_bert:
+            self.lexicon_tree.insert_word(self.lexicon_words)
+        print("Finish Vocab Construction~")
 
         self.examples = EEDataloader(cblue_root).get_data(mode) # get original data
         self.data = self._preprocess(self.examples) # preprocess
 
-        self.uni_vocab = self.word_vocab = None
-        self.lexicon_tree = None
-        self.uni_embedding = self.word_embedding = None
-        print("Space Recycle")
-
+    @staticmethod
     def build_vocab(self, vocab, model_path, lexicon_words=None, error='ignore'):
         with open(model_path, 'r', encoding='utf-8') as f:
             line = f.readline().strip()
@@ -320,9 +319,13 @@ class FlatDataset(Dataset):
             for i in range(sen_len):
                 char_id = self.uni_vocab.to_index(text[i])
                 char_ids.append(char_id)
+
             for i in range(sen_len,len(text)):
-                word_id = self.word_vocab.to_index(text[i])
+                word_id = self.word_vocab.to_index(text[i]) + self.uni_num
+                if text[i] not in self.used_words:
+                    self.used_words.append(text[i])
                 word_ids.append(word_id)
+
             if self.for_nested_ner:
                 for word, L1, L2 in zip(text, label1, label2):
                     if not is_test:
@@ -332,6 +335,7 @@ class FlatDataset(Dataset):
                 for word, L in zip(text,label):
                     if not is_test:
                         label_ids.extend([label2id[L]])
+
             sentence_ids = char_ids + word_ids
             sentence_ids = sentence_ids[:self.max_length]
             start_pos = start_pos[:self.max_length]
@@ -342,25 +346,17 @@ class FlatDataset(Dataset):
             else:
                 lat_len = max(self.max_length - len(char_ids),0)
             char_ids = torch.LongTensor(char_ids).reshape(1,-1)
-            word_ids = torch.LongTensor(word_ids).reshape(1,-1)
             
-            char_embed = self.uni_embedding.forward(char_ids)
-            word_embed = self.word_embedding.forward(word_ids)
-            sen_embed = torch.cat((char_embed,word_embed),dim = 1)
-            sen_embed = sen_embed[:,:self.max_length,:]
-            
-            sen_counter += 1
-
             if not is_test:
                 if self.for_nested_ner:
                     label_ids1 = label_ids1[: self.max_length]
                     label_ids2 = label_ids2[: self.max_length]
-                    data.append((sentence_ids, start_pos, end_pos, sen_len, lat_len, sen_embed, label_ids1, label_ids2))
+                    data.append((sentence_ids, start_pos, end_pos, sen_len, lat_len, label_ids1, label_ids2))
                 else:
                     label_ids = label_ids[: self.max_length]
-                    data.append((sentence_ids, start_pos, end_pos, sen_len, lat_len, sen_embed, label_ids))
+                    data.append((sentence_ids, start_pos, end_pos, sen_len, lat_len, label_ids))
             else:
-                data.append((sentence_ids, start_pos, end_pos, sen_len, lat_len, sen_embed))
+                data.append((sentence_ids, start_pos, end_pos, sen_len, lat_len))
         
         print("finish loading {} sentences".format(sen_counter))
         return data
@@ -391,7 +387,6 @@ class CollateFnForEE:
         end_pos = [x[2] for x in inputs]
         sen_len = [x[3] for x in inputs]
         lat_len = [x[4] for x in inputs]
-        sen_embeds = [x[5] for x in inputs]
 
         if self.for_nested_ner:
             labels1 = [x[6]  for x in inputs] if len(inputs[0]) > 6 else None
@@ -403,40 +398,38 @@ class CollateFnForEE:
         attention_mask = torch.zeros((len(batch), max_len), dtype=torch.long)
 
         for i, _ids in enumerate(input_ids):
-            attention_mask[i][:len(_ids)] = 1
-            _delta_len = max_len - len(_ids)
-            input_ids[i] += [self.pad_token_id] * _delta_len
-            start_pos[i] += [0] * _delta_len
-            end_pos[i] += [0] * _delta_len
-            padding_embed = torch.zeros((1,_delta_len,sen_embeds[i].shape[2]))
-            sen_embeds[i] = torch.cat((sen_embeds[i],padding_embed),dim = 1)
-
-            
+            attention_mask[i][:sen_len[i]] = 1
+            _delta_len = max_len - sen_len[i]
             if not self.for_nested_ner and labels is not None:
                 labels[i] += [self.label_pad_token_id] * _delta_len
             elif self.for_nested_ner and labels1 is not None and labels2 is not None:
                 labels1[i] += [self.label_pad_token_id] * _delta_len
                 labels2[i] += [self.label_pad_token_id] * _delta_len
 
-        sen_embeds = torch.cat(sen_embeds,dim=0)
+            _delta_len = max_len - len(_ids)
+
+            input_ids[i] += [self.pad_token_id] * _delta_len
+            start_pos[i] += [0] * _delta_len
+            end_pos[i] += [0] * _delta_len
+
         if not self.for_nested_ner:
             inputs = {
+                "input_ids": torch.tensor(input_ids, dtype= torch.long),
                 "sen_len": torch.tensor(sen_len, dtype=torch.long),
                 "lat_len": torch.tensor(lat_len, dtype=torch.long),
                 "start_pos": torch.tensor(start_pos, dtype=torch.long),
                 "end_pos": torch.tensor(end_pos, dtype=torch.long),
-                "sen_embeds": sen_embeds,
                 "attention_mask": attention_mask,
                 "labels": torch.tensor(labels, dtype=torch.long) if labels is not None else None,
                 "no_decode": no_decode_flag
             }
         else:
             inputs = {
+                "input_ids": torch.tensor(input_ids, dtype= torch.long),
                 "start_pos": torch.tensor(start_pos, dtype=torch.long),
                 "end_pos": torch.tensor(end_pos, dtype=torch.long),
                 "lat_len": torch.tensor(lat_len, dtype=torch.long),
                 "sen_len": torch.tensor(sen_len, dtype=torch.long),
-                "sen_embeds": sen_embeds,
                 "attention_mask": attention_mask,
                 "labels": torch.tensor(labels1, dtype=torch.long) if labels1 is not None else None,
                 "labels2": torch.tensor(labels2, dtype=torch.long) if labels2 is not None else None,
@@ -455,7 +448,6 @@ if __name__ == '__main__':
 
     from os.path import expanduser
     from transformers import BertTokenizer
-
    
     MODEL_NAME = "../bert-base-chinese"
     CBLUE_ROOT = "../data/CBLUEDatasets"
@@ -463,12 +455,12 @@ if __name__ == '__main__':
     bimodel_path = '../pretrain_model/gigaword_chn.all.a2b.bi.ite50.vec'
     wordmodel_path = '../pretrain_model/ctb.50d.vec'
 
-    dataset = FlatDataset(CBLUE_ROOT, mode="dev", max_length=100, unipath=unimodel_path, wordpath=wordmodel_path, for_nested_ner=False)
+    dataset = FlatDataset(CBLUE_ROOT, mode="train", max_length=100, unipath=unimodel_path, wordpath=wordmodel_path, for_nested_ner=False, use_bert= False)
     
 
     # tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
     # dataset = EEDataset(CBLUE_ROOT, mode="dev", max_length=100, tokenizer=tokenizer, for_nested_ner=True)
     batch = [dataset[0], dataset[1], dataset[2]]
     inputs = CollateFnForEE(pad_token_id=Vocabulary().padding_idx, for_nested_ner=False)(batch)
-    pdb.set_trace()
-    print(inputs)
+    print(len(dataset.used_words))
+

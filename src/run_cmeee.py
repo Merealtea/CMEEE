@@ -2,16 +2,17 @@
 import json
 from lib2to3.pgen2.token import NOTEQUAL
 from os.path import join
+import pdb
 from typing import List
-
+from fastNLP.core import Vocabulary
 from sklearn.metrics import precision_recall_fscore_support
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertAttention
 from transformers import set_seed, BertTokenizer, Trainer, HfArgumentParser, TrainingArguments, BertLayer
 
-from args import ModelConstructArgs, CBLUEDataArgs
+from args import ModelConstructArgs, CBLUEDataArgs, FLATConstructArgs
 from logger import get_logger
 from ee_data import EE_label2id2, EEDataset, EE_NUM_LABELS1, EE_NUM_LABELS2, EE_NUM_LABELS, CollateFnForEE, \
-    EE_label2id1, NER_PAD, EE_label2id
+    EE_label2id1, NER_PAD, EE_label2id, FlatDataset
 from model import BertForCRFHeadNER, BertForLinearHeadNER,  BertForLinearHeadNestedNER, BertForCRFHeadNestedNER, Lattice_Transformer
 from metrics import ComputeMetricsForNER, ComputeMetricsForNestedNER, extract_entities
 from torch.nn import LSTM
@@ -26,8 +27,8 @@ MODEL_CLASS = {
 }
 
 def get_logger_and_args(logger_name: str, _args: List[str] = None):
-    parser = HfArgumentParser([TrainingArguments, ModelConstructArgs, CBLUEDataArgs])
-    train_args, model_args, data_args = parser.parse_args_into_dataclasses(_args)
+    parser = HfArgumentParser([TrainingArguments, ModelConstructArgs, CBLUEDataArgs, FLATConstructArgs])
+    train_args, model_args, data_args, flat_args = parser.parse_args_into_dataclasses(_args)
 
     # ===== Get logger =====
     logger = get_logger(logger_name, exp_dir=train_args.logging_dir, rank=train_args.local_rank)
@@ -40,17 +41,38 @@ def get_logger_and_args(logger_name: str, _args: List[str] = None):
     logger.info(f"==== Train Arguments ==== {train_args.to_json_string()}")
     logger.info(f"==== Model Arguments ==== {model_args.to_json_string()}")
     logger.info(f"==== Data Arguments ==== {data_args.to_json_string()}")
+    logger.info(f"==== FLAT Arguments ==== {flat_args.to_json_string()}")
 
-    return logger, train_args, model_args, data_args
+    return logger, train_args, model_args, data_args, flat_args
 
 
-def get_model_with_tokenizer(model_args):
+def get_model_with_tokenizer(model_args, data_args, flat_args):
     model_class = MODEL_CLASS[model_args.head_type]
 
-    if 'nested' not in model_args.head_type:
-        model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS)
-    else:
-        model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS1, num_labels2=EE_NUM_LABELS2)
+
+    if model_class == Lattice_Transformer:
+        dropout = {
+        'attn' : 0.2, # Attention 层的dropout
+        'res_1' : 0.2, # residual 层的dropout
+        'res_2' : 0.2, # 因为每个encode模块有两个残差链接
+        'ff_1' : 0.2, # FFN层的dropout
+        'ff_2' : 0.2, # FFN层的第二个dropout
+        }
+        model = model_class(50,
+                            flat_args.hidden_size,
+                                flat_args.ff_size,
+                                EE_NUM_LABELS,
+                                flat_args.num_layers,
+                                flat_args.num_heads,
+                                data_args.max_length,
+                                dropout,
+                                flat_args.shared_pos_encoding
+                                )
+    else:      
+        if 'nested' not in model_args.head_type:
+            model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS)
+        else:
+            model = model_class.from_pretrained(model_args.model_path, num_labels1=EE_NUM_LABELS1, num_labels2=EE_NUM_LABELS2)
     
     tokenizer = BertTokenizer.from_pretrained(model_args.model_path)
     return model, tokenizer
@@ -89,27 +111,28 @@ def generate_testing_results(train_args, logger, predictions, test_dataset, for_
 
 def main(_args: List[str] = None):
     # ===== Parse arguments =====
-    logger, train_args, model_args, data_args = get_logger_and_args(__name__, _args)
+    logger, train_args, model_args, data_args, flat_args = get_logger_and_args(__name__, _args)
 
     # ===== Set random seed =====
     set_seed(train_args.seed)
 
     # ===== Get models =====
-    model, tokenizer = get_model_with_tokenizer(model_args)
+    model, tokenizer = get_model_with_tokenizer(model_args, data_args, flat_args)
     for_nested_ner = 'nested' in model_args.head_type
 
     lr_decay_rate = model_args.lr_decay_rate
 
     # ===== Get datasets =====
     if train_args.do_train:
-        train_dataset = EEDataset(data_args.cblue_root, "train", data_args.max_length, tokenizer, for_nested_ner=for_nested_ner)
-        dev_dataset = EEDataset(data_args.cblue_root, "dev", data_args.max_length, tokenizer, for_nested_ner=for_nested_ner)
+        train_dataset = FlatDataset(data_args.cblue_root, "train", data_args.max_length, unipath=data_args.unimodel_path, wordpath=data_args.wordmodel_path, for_nested_ner=False)
+        dev_dataset = FlatDataset(data_args.cblue_root, "dev", data_args.max_length, unipath=data_args.unimodel_path, wordpath=data_args.wordmodel_path, for_nested_ner=False)
         logger.info(f"Trainset: {len(train_dataset)} samples")
         logger.info(f"Devset: {len(dev_dataset)} samples")
     else:
         train_dataset = dev_dataset = None
 
     # ===== Trainer =====
+    print("begin train")
     compute_metrics = ComputeMetricsForNestedNER() if for_nested_ner else ComputeMetricsForNER()
 
     print("This is the model for {}".format(for_nested_ner))
@@ -118,7 +141,7 @@ def main(_args: List[str] = None):
         model=model,
         tokenizer=tokenizer,
         args=train_args,
-        data_collator=CollateFnForEE(tokenizer.pad_token_id, for_nested_ner=for_nested_ner),
+        data_collator=CollateFnForEE(pad_token_id=Vocabulary().padding_idx, for_nested_ner=False),
         train_dataset=train_dataset,
         eval_dataset=dev_dataset,
         compute_metrics=compute_metrics,
@@ -127,9 +150,11 @@ def main(_args: List[str] = None):
     )
 
     
-    for i in train_dataset:
-        print(i)
-        break
+    # for i in train_dataset:
+    #     print(i)
+    #     break
+    print(model)
+
     if train_args.do_train:
         try:
             trainer.train()
@@ -139,7 +164,7 @@ def main(_args: List[str] = None):
     trainer.train_swa()
 
     if train_args.do_predict:
-        test_dataset = EEDataset(data_args.cblue_root, "test", data_args.max_length, tokenizer, for_nested_ner=for_nested_ner)
+        test_dataset = FlatDataset(data_args.cblue_root, "test", data_args.max_length, unipath=data_args.unimodel_path, wordpath=data_args.wordmodel_path, for_nested_ner=for_nested_ner)
         logger.info(f"Testset: {len(test_dataset)} samples")
 
         # np.ndarray, None, None
