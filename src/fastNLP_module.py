@@ -56,7 +56,7 @@ class StaticEmbedding(TokenEmbedding):
     def __init__(self, 
     vocab: Vocabulary, 
     model_dir_or_name: str = 'en', 
-    requires_grad: bool = True, 
+    requires_grad: bool = False, 
     init_method=None,
     dropout=0, 
     word_dropout=0, 
