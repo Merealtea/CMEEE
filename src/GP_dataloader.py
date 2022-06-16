@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 from char_featurizer import Featurizer
 import pdb
+import jieba
 
 NER_PAD, NO_ENT = '[PAD]', 'O'
 
