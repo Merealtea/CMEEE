@@ -16,7 +16,9 @@ Knowledge Graph HM
 使用到的对抗训练代码实现在./src/adversarial.py中，随机参数平均和逐层学习率下降优化都是通过对Trainer进行重载后得到，新重载的Trainer在./src/NewTrainer.py文件中
 
 ## 训练模型
-运行./src/run_cmeee.py文件即可
+bash ./src/run_cmeee.sbatch 
+
+通过设置task id来使用不同的模型
 
 ## Requirements
     
