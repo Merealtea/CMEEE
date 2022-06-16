@@ -19,7 +19,9 @@ class EvalPrediction(NamedTuple):
     predictions: Union[np.ndarray, Tuple[np.ndarray]]
     label_ids: np.ndarray
 
-
+class ComputeMetricsForGP:
+    def __call__(self, eval_pred) -> dict:
+        return {"f1" : -1.0}
 class ComputeMetricsForNER: # training_args  `--label_names labels `
     def __call__(self, eval_pred) -> dict:
         predictions, labels = eval_pred
