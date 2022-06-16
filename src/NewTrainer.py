@@ -3,11 +3,8 @@ from transformers import Trainer
 from torch import nn
 import torch
 from torch.optim.swa_utils import AveragedModel, SWALR
-<<<<<<< HEAD
-=======
 from torch.utils.data import DataLoader,IterableDataset
 from torch.utils.data.distributed import DistributedSampler
->>>>>>> dev-cxy
 
 def get_parameter_names(model, forbidden_layer_types):
     """
@@ -60,7 +57,6 @@ class Trainer_lr_decay(Trainer):
         self.swa_model = None
 
     def create_optimizer_and_scheduler(self, num_training_steps: int):
-<<<<<<< HEAD
         """
         Setup the optimizer and the learning rate scheduler.
 
@@ -68,15 +64,6 @@ class Trainer_lr_decay(Trainer):
         Trainer's init through :obj:`optimizers`, or subclass and override this method (or :obj:`create_optimizer`
         and/or :obj:`create_scheduler`) in a subclass.
         """
-=======
-        """
-        Setup the optimizer and the learning rate scheduler.
-
-        We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
-        Trainer's init through :obj:`optimizers`, or subclass and override this method (or :obj:`create_optimizer`
-        and/or :obj:`create_scheduler`) in a subclass.
-        """
->>>>>>> dev-cxy
         self.create_optimizer()
         self.create_scheduler(num_training_steps=num_training_steps, optimizer=self.optimizer)
         self.create_swa_scheduler(self.optimizer, self.model)
@@ -142,12 +129,6 @@ class Trainer_lr_decay(Trainer):
             self.swa_model = AveragedModel(model)
             self.swa_scheduler = SWALR(optimizer, swa_lr=0.05)
 
-<<<<<<< HEAD
-    def train_swa(self):
-        if not self.swa:
-            return 
-        train_dataloader = self.get_train_dataloader()
-=======
 
     def create_swa_scheduler(self, optimizer: torch.optim.Optimizer = None, model : torch.nn.Module = None):
         """ 创建stochatic weight average scheduler
@@ -165,29 +146,11 @@ class Trainer_lr_decay(Trainer):
 
         args = self.args
 
->>>>>>> dev-cxy
         tr_loss = torch.tensor(0.0).to(args.device)
 
         for epoch in range(self.swa_update_epoches):
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
                 train_dataloader.sampler.set_epoch(epoch)
-<<<<<<< HEAD
-            elif isinstance(train_dataloader.dataset, IterableDatasetShard):
-                train_dataloader.dataset.set_epoch(epoch)
-
-            for input, target in train_dataloader:
-                optimizer.zero_grad()
-                loss_fn(model(input), target).backward()
-                optimizer.step()
-            
-                self.swa_model.update_parameters(self.model)
-                self.swa_scheduler.step()
-
-        # Update bn statistics for the swa_model at the end
-        torch.optim.swa_utils.update_bn(loader, swa_model)
-        # Use swa_model to make predictions on test data 
-        preds = swa_model(test_input)
-=======
             elif isinstance(train_dataloader.dataset, IterableDataset):
                 train_dataloader.dataset.set_epoch(epoch)
             self.optimizer.zero_grad()
@@ -212,31 +175,4 @@ class Trainer_lr_decay(Trainer):
         """将模型设置为参数平均后的模型，方便测试
         """
         self.model = self.swa_model
->>>>>>> dev-cxy
 
-
-# def create_lr_decay_optimizer(trainer, lr_decay):
-#     layer_names = []
-#     for name, _ in trainer.model.named_parameters():
-#         layer_names.append(name)
-
-#     # 越底层的layer学习率要越大
-#     layer_names.reverse()
-
-#     parameters = []
-
-#     prev_name = layer_names[0].split('.')[0]
-#     lr = trainer.lr
-
-#     for name in layer_names:
-#         cur_name = name.split('.')[0]
-
-#         if cur_name != prev_name:
-#             lr *= self.lr_decay_rate
-#         prev_name = cur_name
-        
-#         parameters += [{'params': 
-#                             [p for n, p in model.named_parameters() if n == name and p.requires_grad], 
-#                         'lr': lr}]
-#     optim = torch.optim.AdamW(parameters,
-#                             weight_decay= weight_decay_rate)
