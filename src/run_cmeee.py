@@ -12,15 +12,17 @@ from args import ModelConstructArgs, CBLUEDataArgs
 from logger import get_logger
 from ee_data import EE_label2id2, EEDataset, EE_NUM_LABELS1, EE_NUM_LABELS2, EE_NUM_LABELS, CollateFnForEE, \
     EE_label2id1, NER_PAD, EE_label2id
-from model import BertForCRFHeadNER, BertForLinearHeadNER,  BertForLinearHeadNestedNER, BertForCRFHeadNestedNER, CRFClassifier, LinearClassifier
+from model import BertForCRFHeadNER, BertForLinearHeadNER,  BertForLinearHeadNestedNER, BertForCRFHeadNestedNER, Lattice_Transformer
 from metrics import ComputeMetricsForNER, ComputeMetricsForNestedNER, extract_entities
 from torch.nn import LSTM
+from NewTrainer import Trainer_lr_decay
 
 MODEL_CLASS = {
     'linear': BertForLinearHeadNER, 
     'linear_nested': BertForLinearHeadNestedNER,
     'crf': BertForCRFHeadNER,
     'crf_nested':BertForCRFHeadNestedNER,
+    'FLAT': Lattice_Transformer
 }
 
 def get_logger_and_args(logger_name: str, _args: List[str] = None):
@@ -84,6 +86,7 @@ def generate_testing_results(train_args, logger, predictions, test_dataset, for_
         logger.info(f"`CMeEE_test.json` saved")
 
 
+
 def main(_args: List[str] = None):
     # ===== Parse arguments =====
     logger, train_args, model_args, data_args = get_logger_and_args(__name__, _args)
@@ -94,6 +97,8 @@ def main(_args: List[str] = None):
     # ===== Get models =====
     model, tokenizer = get_model_with_tokenizer(model_args)
     for_nested_ner = 'nested' in model_args.head_type
+
+    lr_decay_rate = model_args.lr_decay_rate
 
     # ===== Get datasets =====
     if train_args.do_train:
@@ -109,7 +114,7 @@ def main(_args: List[str] = None):
 
     print("This is the model for {}".format(for_nested_ner))
     
-    trainer = Trainer(
+    trainer = Trainer_lr_decay(
         model=model,
         tokenizer=tokenizer,
         args=train_args,
@@ -117,7 +122,11 @@ def main(_args: List[str] = None):
         train_dataset=train_dataset,
         eval_dataset=dev_dataset,
         compute_metrics=compute_metrics,
+        lr_decay_rate = lr_decay_rate,
+        swa = False, # 记得改成参数输入
     )
+
+    
     for i in train_dataset:
         print(i)
         break
@@ -126,6 +135,8 @@ def main(_args: List[str] = None):
             trainer.train()
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt")
+
+    trainer.train_swa()
 
     if train_args.do_predict:
         test_dataset = EEDataset(data_args.cblue_root, "test", data_args.max_length, tokenizer, for_nested_ner=for_nested_ner)

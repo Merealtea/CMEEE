@@ -124,7 +124,7 @@ class Transformer_Encoder(nn.Module):
         self.dropout = dropout
         self.num_heads = num_heads
         self.num_layers = num_layers
-        self.max_len = max_len # 输入句子的长度
+        self.max_len = max_len # 输入句子的长度的最长的一个
 
         # 按照原论文直接使用相对位置的embedding
         pe = get_pos_encoding(self.hidden_size, self.max_len)
@@ -150,16 +150,17 @@ class Transformer_Encoder(nn.Module):
         for i in range(self.num_layers):
             self.layers[f'layer_{i}'] = Encoder_Layer(self.hidden_size, self.ff_size, self.num_heads, dropout)
 
-    def get_rel_fusion(self, pos_s, pos_e):
+    def get_rel_fusion(self, pos_s, pos_e, max_len):
         pos_ss = pos_s.unsqueeze(-1)-pos_s.unsqueeze(-2) + self.max_len
         pos_se = pos_s.unsqueeze(-1)-pos_e.unsqueeze(-2) + self.max_len
         pos_es = pos_e.unsqueeze(-1)-pos_s.unsqueeze(-2) + self.max_len
         pos_ee = pos_e.unsqueeze(-1)-pos_e.unsqueeze(-2) + self.max_len
 
-        pe_ss = pos_ss.view(size=[-1, self.max_len, self.max_len, 1])
-        pe_se = pos_se.view(size=[-1, self.max_len, self.max_len, 1])
-        pe_es = pos_es.view(size=[-1, self.max_len, self.max_len, 1])
-        pe_ee = pos_ee.view(size=[-1, self.max_len, self.max_len, 1])
+
+        pe_ss = pos_ss.view(size=[-1, max_len, max_len, 1])
+        pe_se = pos_se.view(size=[-1, max_len, max_len, 1])
+        pe_es = pos_es.view(size=[-1, max_len, max_len, 1])
+        pe_ee = pos_ee.view(size=[-1, max_len, max_len, 1])
 
         if self.share_pos_encoding:
             pe_4 = torch.cat([pe_ss, pe_se, pe_es, pe_ee], dim=-1)
@@ -172,7 +173,7 @@ class Transformer_Encoder(nn.Module):
             pos_unique_embedding_after_fusion = self.rel_fusion(pos_unique_embedding)
             
             rel_pos = pos_unique_embedding_after_fusion[inverse_indices]
-            return rel_pos.view(size=[-1,self.max_len, self.max_len, self.hidden_size])
+            return rel_pos.view(size=[-1,max_len, max_len, self.hidden_size])
 
         else:
             pe_ss, pe_se, pe_es, pe_ee = self.s2s_pe(pe_ss), self.s2e_pe(pe_se), self.e2s_pe(pe_es), self.e2e_pe(pe_ee)
@@ -190,8 +191,9 @@ class Transformer_Encoder(nn.Module):
         """input 是经过了embedding的
             pos_s, pos_e, sen_len, lat_len : LongTensor
         """
-        rel_pos = self.get_rel_fusion(pos_s, pos_e)
-        mask = self.generate_mask(sen_len + lat_len, self.max_len).requires_grad_(False)
+        max_len = inp.shape[1]
+        rel_pos = self.get_rel_fusion(pos_s, pos_e, max_len)
+        mask = self.generate_mask(sen_len + lat_len, max_len).requires_grad_(False)
         for i in range(self.num_layers):
             inp = self.layers[f'layer_{i}'].forward(inp, rel_pos, mask)
             

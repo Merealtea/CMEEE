@@ -1,12 +1,7 @@
-from typing_extensions import runtime
-from transformers import Trainer
-from torch import nn
-import torch
-from torch.optim.swa_utils import AveragedModel, SWALR
-from torch.utils.data import DataLoader,IterableDataset
 
+from torch.utils.data import DataLoader,IterableDataset
 from torch.utils.data.distributed import DistributedSampler
-from tqdm import tqdm
+
 
 def get_parameter_names(model, forbidden_layer_types):
     """
@@ -69,7 +64,6 @@ class Trainer_lr_decay(Trainer):
         self.create_optimizer()
         self.create_scheduler(num_training_steps=num_training_steps, optimizer=self.optimizer)
         self.create_swa_scheduler(self.optimizer, self.model)
-        print("完成创建优化器和scheduler")
 
     def create_optimizer(self):
         """
@@ -78,15 +72,6 @@ class Trainer_lr_decay(Trainer):
         We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
         Trainer's init through `optimizers`, or subclass and override this method in a subclass.
         """
-        assert self.lr_decay_rate < 1, "lr decay rate 应该在0,1之间，或者是-1"
-
-        if self.lr_decay_rate == -1:
-            print("没有使用layer-wise lr decay")
-        else:
-            print(f"使用了layer-wise lr decay ， decay rate 是 {self.lr_decay_rate}")
-
-        print(self.args.device)
-
         lr_decay_rate = 1 if self.lr_decay_rate == -1 else self.lr_decay_rate
 
         opt_model = self.model
@@ -142,14 +127,23 @@ class Trainer_lr_decay(Trainer):
             self.swa_scheduler = SWALR(optimizer, swa_lr=0.05)
 
 
+    def create_swa_scheduler(self, optimizer: torch.optim.Optimizer = None, model : torch.nn.Module = None):
+        """ 创建stochatic weight average scheduler
+        """
+        if self.swa and self.swa_scheduler is None:
+            self.swa_model = AveragedModel(model)
+            self.swa_scheduler = SWALR(optimizer, swa_lr=0.05)
+
+
     def train_swa(self):
         if not self.swa:
-            self.swa_model = self.swa
             return self.model
 
         train_dataloader = self.get_train_dataloader()
 
         args = self.args
+
+        tr_loss = torch.tensor(0.0).to(args.device)
 
         for epoch in range(self.swa_update_epoches):
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
@@ -157,9 +151,8 @@ class Trainer_lr_decay(Trainer):
             elif isinstance(train_dataloader.dataset, IterableDataset):
                 train_dataloader.dataset.set_epoch(epoch)
             self.optimizer.zero_grad()
-            
-            tr_loss = torch.tensor(0.0).to(args.device)
-            for step, input in tqdm(enumerate(train_dataloader)):
+
+            for step, input in enumerate(train_dataloader):
                 loss = self.compute_loss(self.model, input)
                 loss.backward()
                 tr_loss += loss.detach()
@@ -169,8 +162,6 @@ class Trainer_lr_decay(Trainer):
                     self.swa_model.update_parameters(self.model)
                     self.swa_scheduler.step()
                     self.optimizer.zero_grad()
-            tr_loss /= step
-            print(f"train loss is {tr_loss}")
 
         # Update bn statistics for the swa_model at the end
         torch.optim.swa_utils.update_bn(train_dataloader, self.swa_model)
@@ -208,20 +199,3 @@ class Trainer_lr_decay(Trainer):
 #                         'lr': lr}]
 #     optim = torch.optim.AdamW(parameters,
 #                             weight_decay= weight_decay_rate)
-    def num_examples(self, dataloader: DataLoader) -> int:
-        """
-        Helper to get number of samples in a :class:`~torch.utils.data.DataLoader` by accessing its dataset.
-
-        Will raise an exception if the underlying dataset does not implement method :obj:`__len__`
-        """
-        print("Get Num Examples")
-        return len(dataloader.dataset)
-
-    def is_local_process_zero(self) -> bool:
-        """
-        Whether or not this process is the local (e.g., on one machine if training in a distributed fashion on several
-        machines) main process.
-        """
-        print("local process")
-        return self.args.local_process_index == 0
-
