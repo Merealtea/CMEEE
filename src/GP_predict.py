@@ -1,3 +1,7 @@
+"""
+Reference code url: https://github.com/gaohongkui/GlobalPointer_pytorch/tree/main/models
+"""
+
 from transformers import BertModel, BertTokenizerFast, BertForSequenceClassification
 from GP_module import GlobalPointer
 import json
