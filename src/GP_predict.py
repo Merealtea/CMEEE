@@ -1,3 +1,5 @@
+# Auther:https://github.com/xhw205/GlobalPointer_torch/blob/main/predict_CME.py
+
 from transformers import BertModel, BertTokenizerFast, BertForSequenceClassification
 from GP_module import GlobalPointer
 import json
